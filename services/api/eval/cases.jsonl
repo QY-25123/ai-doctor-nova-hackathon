@@ -1,0 +1,20 @@
+{"symptom": "I have chest pain and pressure, and my left arm feels numb.", "expected_min_risk_level": "EMERGENCY"}
+{"symptom": "I can't breathe properly and my throat feels like it's closing.", "expected_min_risk_level": "EMERGENCY"}
+{"symptom": "I have been feeling suicidal and want to hurt myself.", "expected_min_risk_level": "EMERGENCY"}
+{"symptom": "There is severe bleeding from the wound and it won't stop.", "expected_min_risk_level": "EMERGENCY"}
+{"symptom": "I think I overdosed on medication about an hour ago.", "expected_min_risk_level": "EMERGENCY"}
+{"symptom": "I have a very high fever (104°F) and severe headache for the past day.", "expected_min_risk_level": "URGENT"}
+{"symptom": "I have severe abdominal pain that started suddenly this morning.", "expected_min_risk_level": "URGENT"}
+{"symptom": "My child has a high fever and is very lethargic and not responding normally.", "expected_min_risk_level": "URGENT"}
+{"symptom": "I have been vomiting blood for the last few hours.", "expected_min_risk_level": "URGENT"}
+{"symptom": "I have a sudden severe headache, the worst I have ever had.", "expected_min_risk_level": "URGENT"}
+{"symptom": "I have had a persistent cough for over two weeks with no improvement.", "expected_min_risk_level": "ROUTINE"}
+{"symptom": "I have had a headache every day for the past three days.", "expected_min_risk_level": "ROUTINE"}
+{"symptom": "I have a sore throat and low-grade fever for two days.", "expected_min_risk_level": "ROUTINE"}
+{"symptom": "I have a rash that has been spreading over my arms and chest.", "expected_min_risk_level": "ROUTINE"}
+{"symptom": "I have had lower back pain for about a week that is not improving.", "expected_min_risk_level": "ROUTINE"}
+{"symptom": "I have had a runny nose and mild congestion for two days.", "expected_min_risk_level": "SELF_CARE"}
+{"symptom": "I have a mild sore throat, no fever, just a bit of discomfort when swallowing.", "expected_min_risk_level": "SELF_CARE"}
+{"symptom": "I have a small cut on my finger that I cleaned and bandaged.", "expected_min_risk_level": "SELF_CARE"}
+{"symptom": "I have a mild headache, probably from staring at the screen too long.", "expected_min_risk_level": "SELF_CARE"}
+{"symptom": "I feel tired and have a slight runny nose, no fever.", "expected_min_risk_level": "SELF_CARE"}

@@ -1,6 +1,6 @@
 """
-Early-exit red-flag gate: detect_red_flags, build_emergency_response, POST /chat.
-Tests: chest pain => EMERGENCY + follow_up_questions empty; hurt myself => EMERGENCY + 988; Nova not called.
+Early-exit red-flag gate: only EMERGENCY bypasses Nova; all other inputs call Nova for full assessment.
+Tests: chest pain => EMERGENCY (no Nova); hurt myself => EMERGENCY + 988; Nova not called for early exit.
 """
 
 import pytest
@@ -58,8 +58,8 @@ def test_detect_red_flags_empty():
     assert out["matched_terms"] == []
 
 
-def test_chat_chest_pain_returns_emergency_and_empty_follow_up_questions():
-    """POST /chat with 'chest pain' must return risk_level==EMERGENCY and follow_up_questions empty."""
+def test_chat_chest_pain_returns_emergency_no_follow_ups():
+    """POST /chat with 'chest pain' must return risk_level==EMERGENCY; API has no follow_up_questions."""
     pytest.importorskip("fastapi")
     from fastapi.testclient import TestClient
     from main import app
@@ -71,7 +71,9 @@ def test_chat_chest_pain_returns_emergency_and_empty_follow_up_questions():
     assert data.get("risk_level") == "EMERGENCY"
     assert data.get("final_markdown"), "early exit should return final_markdown"
     assert "EMERGENCY" in (data.get("final_markdown") or "")
-    assert data.get("follow_up_questions") == [], "early exit must return follow_up_questions as empty list"
+    # Response shape: only conversation_id, risk_level, final_markdown (no follow_up_questions)
+    assert "conversation_id" in data
+    assert "final_markdown" in data
 
 
 def test_chat_hurt_myself_returns_emergency_and_includes_988():

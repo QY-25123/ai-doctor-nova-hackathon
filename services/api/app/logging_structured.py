@@ -31,6 +31,7 @@ def log_request(
     latency_ms: float,
     risk_level: str | None = None,
     red_flag_hits: int = 0,
+    nova_called: bool = False,
     rag_k: int | None = None,
     model_tokens_est: int = 0,
 ) -> None:
@@ -41,6 +42,7 @@ def log_request(
         "latency_ms": round(latency_ms, 2),
         "risk_level": risk_level,
         "red_flag_hits": red_flag_hits,
+        "nova_called": nova_called,
         "rag_k": rag_k,
         "model_tokens_est": model_tokens_est,
     }

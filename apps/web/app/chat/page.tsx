@@ -24,7 +24,6 @@ interface SpeechRecognitionInstance extends EventTarget {
 type Message = {
   role: "user" | "assistant";
   content?: string;
-  follow_up_questions?: string[];
   final_markdown?: string;
 };
 
@@ -64,16 +63,13 @@ export default function ChatPage() {
         });
         if (!res.ok) throw new Error(res.statusText);
         const data = (await res.json()) as {
-          reply: string;
           conversation_id: number;
-          follow_up_questions?: string[];
-          final_markdown?: string;
+          risk_level: string | null;
+          final_markdown: string | null;
         };
         setConversationId(data.conversation_id);
         const assistantMsg: Message = {
           role: "assistant",
-          content: data.reply || undefined,
-          follow_up_questions: data.follow_up_questions ?? undefined,
           final_markdown: data.final_markdown ?? undefined,
         };
         setMessages((prev) => [...prev, assistantMsg]);
@@ -91,10 +87,6 @@ export default function ChatPage() {
     sendMessage(input);
   }
 
-  function handleChipClick(question: string) {
-    sendMessage(question);
-  }
-
   useEffect(() => {
     if (typeof window === "undefined") return;
     const SpeechRecognitionAPI =
@@ -105,7 +97,7 @@ export default function ChatPage() {
     const rec = new SpeechRecognitionAPI() as SpeechRecognitionInstance;
     rec.continuous = false;
     rec.interimResults = false;
-    rec.lang = "zh-CN";
+    rec.lang = "en-US";
     rec.onresult = (event: SpeechRecognitionEvent) => {
       const transcript = event.results[event.resultIndex][0].transcript;
       setInput((prev) => (prev ? `${prev} ${transcript}` : transcript));
@@ -138,7 +130,7 @@ export default function ChatPage() {
   return (
     <main className="chat-layout">
       <header className="chat-header">
-        <h1>Health assistant</h1>
+        <h1>Health Assistant</h1>
         <p>General information only. Not medical advice.</p>
       </header>
 
@@ -149,7 +141,7 @@ export default function ChatPage() {
         {messages.map((m, i) => (
           <div key={i} className={`message message--${m.role}`}>
             <div className="message-bubble">
-              {m.content && <p className="message-text">{m.content}</p>}
+              {m.role === "user" && m.content && <p className="message-text">{m.content}</p>}
               {m.final_markdown && (
                 <div className="markdown-viewer">
                   <ReactMarkdown
@@ -168,24 +160,6 @@ export default function ChatPage() {
                   >
                     {m.final_markdown}
                   </ReactMarkdown>
-                </div>
-              )}
-              {m.follow_up_questions && m.follow_up_questions.length > 0 && (
-                <div className="follow-ups">
-                  <span className="follow-ups-label">Follow-up questions:</span>
-                  <div className="chips">
-                    {m.follow_up_questions.map((q, j) => (
-                      <button
-                        key={j}
-                        type="button"
-                        className="chip"
-                        onClick={() => handleChipClick(q)}
-                        disabled={loading}
-                      >
-                        {q}
-                      </button>
-                    ))}
-                  </div>
                 </div>
               )}
             </div>

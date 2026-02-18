@@ -45,11 +45,11 @@ class ChatRequest(BaseModel):
 
 
 class ChatResponse(BaseModel):
-    reply: str = ""
+    """Only conversation_id, risk_level, and final_markdown. No follow_up_questions."""
+
     conversation_id: int
-    follow_up_questions: list[str] | None = None
-    final_markdown: str | None = None
     risk_level: str | None = None
+    final_markdown: str | None = None
 
 
 def _build_messages(conv_id: int) -> list[dict]:
@@ -80,21 +80,22 @@ def chat(request: ChatRequest) -> ChatResponse:
     add_message(conv_id, "user", request.message)
     messages.append({"role": "user", "content": request.message})
 
-    follow_up_questions: list[str] | None = None
     final_markdown: str | None = None
-    reply = ""
     risk_level: str | None = None
     red_flag_hits = 0
     rag_k: int | None = None
     model_tokens_est = 0
 
-    # EARLY-EXIT red-flag gate: very first thing, before follow-ups and before any Nova calls
+    # 1) Run red-flag detection FIRST (English-only, case-insensitive)
     from app.safety.red_flags import detect_red_flags
     from app.safety.early_exit import build_emergency_response
 
     flags = detect_red_flags(request.message)
     red_flag_hits = len(flags["matched_terms"])
-    if flags["is_self_harm"] or flags["is_emergency_medical"]:
+    is_emergency = flags["is_self_harm"] or flags["is_emergency_medical"]
+
+    # 2) EARLY EXIT ONLY if EMERGENCY: fixed safe result, no Nova
+    if is_emergency:
         result = build_emergency_response(flags)
         from app.llm.clinical_flow import FinalAssessmentResponse
         from app.llm.renderer import render_assessment_markdown
@@ -102,8 +103,7 @@ def chat(request: ChatRequest) -> ChatResponse:
 
         assessment = FinalAssessmentResponse(**result, citations=[])
         final_markdown = render_assessment_markdown(assessment)
-        reply = "Here is information based on your description. This is not medical advice."
-        add_message(conv_id, "assistant", reply)
+        add_message(conv_id, "assistant", "Here is information based on your description. This is not medical advice.")
         risk_level = "EMERGENCY"
         try:
             save_assessment(
@@ -128,41 +128,13 @@ def chat(request: ChatRequest) -> ChatResponse:
             latency_ms=latency_ms,
             risk_level=risk_level,
             red_flag_hits=red_flag_hits,
+            nova_called=False,
             rag_k=rag_k,
-            model_tokens_est=_estimate_tokens((reply or "") + (final_markdown or "")),
+            model_tokens_est=_estimate_tokens(final_markdown or ""),
         )
-        return ChatResponse(
-            reply=reply,
-            conversation_id=conv_id,
-            final_markdown=final_markdown,
-            risk_level=risk_level,
-            follow_up_questions=[],
-        )
+        return ChatResponse(conversation_id=conv_id, risk_level=risk_level, final_markdown=final_markdown)
 
-    # First turn: return follow-up questions (or placeholder)
-    if len([m for m in messages if m["role"] == "user"]) == 1:
-        try:
-            from app.llm.clinical_flow import generate_followups
-            follow_up_questions = generate_followups(messages)
-            reply = "Choose a follow-up question below or describe your situation in your own words."
-            model_tokens_est = _estimate_tokens(reply + " ".join(follow_up_questions or []))
-        except Exception:
-            follow_up_questions = ["How long have your symptoms lasted?", "Do you have a fever?", "Any other symptoms?"]
-            reply = "Choose a question below or type your own."
-        add_message(conv_id, "assistant", reply)
-        latency_ms = (time.perf_counter() - start) * 1000
-        log_request(
-            request_id=request_id,
-            conversation_id=conv_id,
-            latency_ms=latency_ms,
-            risk_level=risk_level,
-            red_flag_hits=red_flag_hits,
-            rag_k=rag_k,
-            model_tokens_est=model_tokens_est,
-        )
-        return ChatResponse(reply=reply, conversation_id=conv_id, follow_up_questions=follow_up_questions, risk_level=risk_level)
-
-    # Second turn onward: model inference -> guardrails -> rendering (red-flag early exit already done at top)
+    # 3) ALL NON-EMERGENCY: do NOT generate follow-ups; ALWAYS call Nova once for final assessment
     try:
         from app.llm.clinical_flow import final_assessment
         from app.llm.renderer import render_assessment_markdown
@@ -178,28 +150,22 @@ def chat(request: ChatRequest) -> ChatResponse:
                 final_risk_level=risk_level,
             )
         rag_k = RAG_K
-        # 3. Render only after guardrails (so risk_level/summary/etc. are final)
         final_markdown = render_assessment_markdown(
             result.assessment,
             emergency_message=result.emergency_message,
         )
-        reply = "Here is information based on your description. This is not medical advice."
-        add_message(conv_id, "assistant", reply)
-        model_tokens_est = _estimate_tokens((reply or "") + (final_markdown or ""))
+        add_message(conv_id, "assistant", "Here is information based on your description. This is not medical advice.")
+        model_tokens_est = _estimate_tokens(final_markdown or "")
     except Exception:
-        reply = (
-            "This is general information only, not medical advice. "
-            "Consult a healthcare provider for your situation."
-        )
         final_markdown = (
             "## Disclaimer\n\nThis is general information only, not medical advice. "
             "This system does not diagnose or prescribe. Always consult a qualified healthcare provider.\n\n"
             "## Risk level\n\n**ROUTINE** — A routine doctor visit is recommended when convenient.\n\n"
             "## When to seek care\n\n- If symptoms worsen or last more than a few days, see a doctor."
         )
-        add_message(conv_id, "assistant", reply)
+        add_message(conv_id, "assistant", "This is general information only, not medical advice. Consult a healthcare provider for your situation.")
         risk_level = "ROUTINE"
-        model_tokens_est = _estimate_tokens(reply + final_markdown)
+        model_tokens_est = _estimate_tokens(final_markdown)
 
     latency_ms = (time.perf_counter() - start) * 1000
     log_request(
@@ -208,10 +174,11 @@ def chat(request: ChatRequest) -> ChatResponse:
         latency_ms=latency_ms,
         risk_level=risk_level,
         red_flag_hits=red_flag_hits,
+        nova_called=True,
         rag_k=rag_k,
         model_tokens_est=model_tokens_est,
     )
-    return ChatResponse(reply=reply, conversation_id=conv_id, final_markdown=final_markdown, risk_level=risk_level)
+    return ChatResponse(conversation_id=conv_id, risk_level=risk_level, final_markdown=final_markdown)
 
 
 @app.get("/conversations/{conversation_id}/history")

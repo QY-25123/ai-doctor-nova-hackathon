@@ -15,28 +15,46 @@ Based on the conversation so far, generate 3 to 6 short follow-up questions in E
 - Output a JSON object with a single key "follow_ups": an array of question strings (3-6 items).
 """
 
-# Stage 2: Final assessment (English only, strict JSON schema)
-PROMPT_FINAL_ASSESSMENT = f"""{SYSTEM_SCOPE}
+# --- Final assessment: medical triage, substantive content only ---
+SYSTEM_TRIAGE = (
+    "You are a medical triage assistant. "
+    "You do NOT diagnose, prescribe, or replace a doctor. Provide specific, actionable guidance only. "
+    "Choose risk_level based on symptom severity. Use:\n"
+    "  SELF_CARE = minor symptom (e.g. mild headache, runny nose, small cut).\n"
+    "  ROUTINE = non-urgent doctor visit when convenient (e.g. persistent cough, mild fever).\n"
+    "  URGENT = same-day evaluation recommended (e.g. high fever with severe headache, sudden severe pain).\n"
+    "  EMERGENCY = immediate emergency care required (e.g. chest pain, severe breathing difficulty, stroke signs, severe bleeding, overdose).\n"
+    "Output MUST be valid JSON only. No markdown, no code fences, no explanation. Keep disclaimers minimal; do not repeat them in multiple sections."
+)
 
-Based on the full conversation, produce a structured assessment as a single JSON object with EXACTLY these keys. Write all string values in English.
+# Exact JSON shape and substantive minimums
+FINAL_ASSESSMENT_JSON_FORMAT = """
+{
+  "risk_level": "SELF_CARE | ROUTINE | URGENT | EMERGENCY",
+  "summary": ["(a) what it might be", "(b) what info is missing", "(c) what to do next", ...],
+  "possible_causes": ["cause1", "cause2", "cause3", ...],
+  "home_care": ["step1", "step2", "step3", "step4", "step5", ...],
+  "when_to_seek_care": ["criterion1", "criterion2", "red flags", ...],
+  "red_flags": ["warning1", "warning2", "warning3", ...]
+}
+"""
 
-- risk_level: exactly one of "EMERGENCY" | "URGENT" | "ROUTINE" | "SELF_CARE"
-  - EMERGENCY: possible life-threatening (e.g. chest pain, severe breathing difficulty, stroke signs, severe bleeding, overdose).
-  - URGENT: should see a doctor soon (e.g. high fever, severe pain, worsening symptoms).
-  - ROUTINE: suitable for routine doctor visit when convenient.
-  - SELF_CARE: general self-care information may be sufficient; still suggest when to seek care if things change.
+# Stage 2: Final assessment — substantive content, minimum counts
+PROMPT_FINAL_ASSESSMENT = f"""{SYSTEM_TRIAGE}
 
-- summary: array of 3-6 short bullet points (strings) summarizing the situation in neutral, non-diagnostic language.
+Based on the user's symptom(s), produce a structured triage assessment. You MUST return a single JSON object in this format (all values in English):
 
-- possible_causes: array of strings. Use cautious language (e.g. "can be associated with...", "sometimes related to..."). Do NOT state that the user has a specific condition.
+{FINAL_ASSESSMENT_JSON_FORMAT}
 
-- home_care: array of short, general self-care suggestions (no medication dosing or prescription advice).
+Content rules (strict):
+- risk_level: exactly one of "SELF_CARE" | "ROUTINE" | "URGENT" | "EMERGENCY". Choose based on symptom severity.
+- summary: array of 3–6 points that MUST include: (a) what it might be (cautious language), (b) what information is missing to better assess, (c) what to do next. Do NOT use generic filler like "General guidance provided based on description."
+- possible_causes: at least 3 items. Use cautious language (e.g. "can be associated with..."). Do NOT state that the user has a specific condition.
+- home_care: at least 5 concrete steps (e.g. fluids, rest, OTC guidance, triggers to avoid, when to re-evaluate). No medication dosing or prescription advice.
+- when_to_seek_care: at least 5 items including specific red flags and escalation criteria (when to see a doctor or seek emergency care).
+- red_flags: at least 3 items tailored to the symptom (warning signs that should prompt immediate or urgent care).
 
-- when_to_seek_care: array of clear criteria (symptoms, duration, red flags) for when to consult a doctor or seek emergency care.
+You may include "sources_query" (array of 2–5 short English search queries for references) if helpful.
 
-- red_flags: array of warning signs that should prompt immediate or urgent medical attention.
-
-- sources_query: array of 2-5 short search queries (in English) that could be used to retrieve authoritative health information (e.g. for RAG). Be specific and factual.
-
-Do not add any other keys. Do not diagnose. Keep all text concise and suitable for patient-facing information.
+Do NOT include empty or generic filler. Do NOT repeat disclaimers in multiple sections. Return only the JSON object.
 """

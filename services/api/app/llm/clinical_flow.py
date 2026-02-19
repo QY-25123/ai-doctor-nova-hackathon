@@ -2,13 +2,14 @@
 2-stage clinical flow: generate_followups and final_assessment (strict JSON). English only.
 Uses prompt templates and Pydantic validation; does not diagnose.
 Citations are added after LLM response via RAG (optional).
+Context hygiene: final_assessment sends only system + latest user (and optional prior summary).
 """
 
 from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from app.llm.nova_client import invoke_nova_json
+from app.llm.nova_client import invoke_nova_json, repair_final_assessment_for_quality
 from app.llm.prompts import PROMPT_FINAL_ASSESSMENT, PROMPT_FOLLOWUPS
 
 # --- Pydantic models ---
@@ -59,6 +60,42 @@ def generate_followups(messages: list[dict]) -> list[str]:
 # --- Stage 2: Final assessment ---
 
 
+def _build_final_assessment_messages(messages: list[dict]) -> list[dict]:
+    """
+    Context hygiene: return only the latest user message and optionally a compact
+    summary of prior user symptoms. Do NOT include prior assistant messages (e.g. disclaimers).
+    """
+    user_contents: list[str] = []
+    for m in messages:
+        if m.get("role") != "user":
+            continue
+        content = m.get("content", "")
+        if isinstance(content, list):
+            content = content[0].get("text", "") if content else ""
+        content = str(content).strip()
+        if content:
+            user_contents.append(content)
+    if not user_contents:
+        return [{"role": "user", "content": "I have a health question."}]
+    if len(user_contents) == 1:
+        return [{"role": "user", "content": user_contents[-1]}]
+    prior = " | ".join(user_contents[:-1][-3:])  # up to 3 prior user messages, compact
+    latest = user_contents[-1]
+    return [{"role": "user", "content": f"Prior symptoms/context: {prior}\n\nLatest: {latest}"}]
+
+
+def _is_substantive(resp: FinalAssessmentResponse) -> bool:
+    """Quality check: sufficient items and no generic filler in summary."""
+    summary_text = " ".join(resp.summary or []).lower()
+    if "general guidance provided" in summary_text:
+        return False
+    if len(resp.possible_causes or []) < 2:
+        return False
+    if len(resp.home_care or []) < 3:
+        return False
+    return True
+
+
 def _get_citations_for_assessment(sources_query: list[str], top_k: int = 5) -> list[Citation]:
     """Run RAG on sources_query and return list of Citation. No-op if index missing or no queries."""
     if not sources_query:
@@ -88,12 +125,37 @@ def _get_citations_for_assessment(sources_query: list[str], top_k: int = 5) -> l
     return citations[:15]
 
 
+def _last_user_content(messages: list[dict]) -> str:
+    """Extract the latest user message content."""
+    for m in reversed(messages):
+        if m.get("role") != "user":
+            continue
+        c = m.get("content", "")
+        c = c[0].get("text", c) if isinstance(c, list) else str(c)
+        return (c or "").strip()
+    return ""
+
+
 def final_assessment(messages: list[dict]) -> FinalAssessmentResponse:
     """
     Returns a strict JSON assessment: risk_level, summary, possible_causes,
     home_care, when_to_seek_care, red_flags, sources_query, plus citations from RAG. English only.
-    messages: full conversation [{"role": "user"|"assistant", "content": "..."}]
+    Sends only system + latest user (and optional prior summary); no prior assistant messages.
+    Triggers quality repair if output is generic or below minimum item counts.
     """
-    resp = invoke_nova_json(messages, PROMPT_FINAL_ASSESSMENT, FinalAssessmentResponse)
+    reduced = _build_final_assessment_messages(messages)
+    last_user = _last_user_content(messages) or "User described symptoms."
+    resp = invoke_nova_json(
+        reduced,
+        PROMPT_FINAL_ASSESSMENT,
+        FinalAssessmentResponse,
+        user_symptom_for_repair=last_user,
+    )
+    if not _is_substantive(resp):
+        resp = repair_final_assessment_for_quality(
+            last_user,
+            PROMPT_FINAL_ASSESSMENT,
+            FinalAssessmentResponse,
+        )
     citations = _get_citations_for_assessment(resp.sources_query)
     return resp.model_copy(update={"citations": citations})

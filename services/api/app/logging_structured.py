@@ -34,8 +34,10 @@ def log_request(
     nova_called: bool = False,
     rag_k: int | None = None,
     model_tokens_est: int = 0,
+    nova_risk_level: str | None = None,
+    nova_model: str | None = None,
 ) -> None:
-    """Emit one JSON log line and update in-memory metrics."""
+    """Emit one JSON log line and update in-memory metrics. risk_level is final (after guardrails); nova_risk_level is what Nova returned; nova_model is the model used when nova_called is True."""
     payload = {
         "request_id": request_id,
         "conversation_id": conversation_id,
@@ -45,6 +47,8 @@ def log_request(
         "nova_called": nova_called,
         "rag_k": rag_k,
         "model_tokens_est": model_tokens_est,
+        "nova_risk_level": nova_risk_level,
+        "nova_model": nova_model,
     }
     print(json.dumps(payload), file=sys.stderr, flush=True)
 
@@ -88,5 +92,47 @@ def log_guardrail_trigger(
         "request_id": request_id,
         "matched_terms": matched_terms,
         "final_risk_level": final_risk_level,
+    }
+    print(json.dumps(payload), file=sys.stderr, flush=True)
+
+
+def log_nova_response_parse_failed(
+    *,
+    response_snippet: str,
+) -> None:
+    """Log when Nova response had no extractable text or JSON validation failed."""
+    payload = {
+        "event": "nova_response_parse_failed",
+        "response_snippet": response_snippet,
+    }
+    print(json.dumps(payload), file=sys.stderr, flush=True)
+
+
+def log_nova_parse_failed_first_pass(
+    *,
+    response_snippet: str,
+) -> None:
+    """Log when first-pass parse of Nova JSON failed (before repair retry)."""
+    payload = {
+        "event": "nova_parse_failed_first_pass",
+        "response_snippet": response_snippet,
+    }
+    print(json.dumps(payload), file=sys.stderr, flush=True)
+
+
+def log_nova_parse_repaired() -> None:
+    """Log when repair retry succeeded and output parsed into schema."""
+    payload = {"event": "nova_parse_repaired"}
+    print(json.dumps(payload), file=sys.stderr, flush=True)
+
+
+def log_nova_parse_failed_final(
+    *,
+    response_snippet: str,
+) -> None:
+    """Log when repair retry still failed to produce valid schema."""
+    payload = {
+        "event": "nova_parse_failed_final",
+        "response_snippet": response_snippet,
     }
     print(json.dumps(payload), file=sys.stderr, flush=True)

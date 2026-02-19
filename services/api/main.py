@@ -8,7 +8,7 @@ from pydantic import BaseModel
 
 from db import init_db
 from repo import add_message, create_conversation, get_conversation_history
-from app.logging_structured import generate_request_id, get_metrics, log_guardrail_trigger, log_request
+from app.logging_structured import generate_request_id, get_metrics, log_guardrail_trigger, log_nova_response_parse_failed, log_request
 
 
 @asynccontextmanager
@@ -37,6 +37,16 @@ def health() -> dict[str, str]:
 def metrics() -> dict:
     """Basic counters as JSON (no Prometheus)."""
     return get_metrics()
+
+
+@app.get("/debug/nova")
+def debug_nova() -> dict:
+    """Return Nova config (no secrets)."""
+    from app.llm.nova_client import NOVA_API_BASE_URL, NOVA_MODEL_ID
+    return {
+        "base_url": NOVA_API_BASE_URL,
+        "model": NOVA_MODEL_ID,
+    }
 
 
 class ChatRequest(BaseModel):
@@ -131,6 +141,7 @@ def chat(request: ChatRequest) -> ChatResponse:
             nova_called=False,
             rag_k=rag_k,
             model_tokens_est=_estimate_tokens(final_markdown or ""),
+            nova_model=None,
         )
         return ChatResponse(conversation_id=conv_id, risk_level=risk_level, final_markdown=final_markdown)
 
@@ -142,7 +153,7 @@ def chat(request: ChatRequest) -> ChatResponse:
 
         model_result = final_assessment(messages)
         result = apply_guardrails(request.message, model_result)
-        risk_level = result.assessment.risk_level
+        risk_level = result.assessment.risk_level  # From parsed Nova JSON (guardrails may override to EMERGENCY)
         if result.matched_terms:
             log_guardrail_trigger(
                 request_id=request_id,
@@ -156,7 +167,9 @@ def chat(request: ChatRequest) -> ChatResponse:
         )
         add_message(conv_id, "assistant", "Here is information based on your description. This is not medical advice.")
         model_tokens_est = _estimate_tokens(final_markdown or "")
-    except Exception:
+        nova_risk_level = model_result.risk_level
+    except Exception as e:
+        log_nova_response_parse_failed(response_snippet=str(e))
         final_markdown = (
             "## Disclaimer\n\nThis is general information only, not medical advice. "
             "This system does not diagnose or prescribe. Always consult a qualified healthcare provider.\n\n"
@@ -166,8 +179,10 @@ def chat(request: ChatRequest) -> ChatResponse:
         add_message(conv_id, "assistant", "This is general information only, not medical advice. Consult a healthcare provider for your situation.")
         risk_level = "ROUTINE"
         model_tokens_est = _estimate_tokens(final_markdown)
+        nova_risk_level = None
 
     latency_ms = (time.perf_counter() - start) * 1000
+    from app.llm.nova_client import NOVA_MODEL_ID
     log_request(
         request_id=request_id,
         conversation_id=conv_id,
@@ -177,6 +192,8 @@ def chat(request: ChatRequest) -> ChatResponse:
         nova_called=True,
         rag_k=rag_k,
         model_tokens_est=model_tokens_est,
+        nova_risk_level=nova_risk_level,
+        nova_model=NOVA_MODEL_ID,
     )
     return ChatResponse(conversation_id=conv_id, risk_level=risk_level, final_markdown=final_markdown)
 
